@@ -56,13 +56,10 @@ The last invariant is what proves no liquidity is created or lost.
 Measured with JMH, in-process, against a book pre-loaded with 10,000 orders.
 
 ```
-Environment: WSL2 (Ubuntu), OpenJDK 21, single thread, 10k order book depth
-             -Xms2g -Xmx2g -XX:+AlwaysPreTouch
-
-Latency:     175.1 ± 5.8 ns/op       (avgt, 3 forks × 10 iterations)
-Throughput:  5.84M ± 0.18M ops/s
-Allocation:  296.2 B/op
-GC:          65 collections, 3.05 s total
+| Step | Change                        | Latency  | Allocation |
+|------|-------------------------------|----------|------------|
+| 0    | Baseline                      | 175.1 ns | 296.2 B/op |
+| 1    | Lazy trade list allocation    | 167.6 ns | 272.4 B/op |
 ```
 
 Three forks matter here: JIT compilation decisions vary between JVM runs, and
