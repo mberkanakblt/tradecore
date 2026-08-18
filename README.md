@@ -56,11 +56,14 @@ The last invariant is what proves no liquidity is created or lost.
 Measured with JMH, in-process, against a book pre-loaded with 10,000 orders.
 
 ```
-Environment: WSL2 (Ubuntu), OpenJDK 21, single thread
-Latency:     204.3 ± 6.1 ns/op          (avgt, 3 forks × 10 iterations)
-Throughput:  4.95M ± 0.17M ops/s
-```
+Environment: WSL2 (Ubuntu), OpenJDK 21, single thread, 10k order book depth
+             -Xms2g -Xmx2g -XX:+AlwaysPreTouch
 
+Latency:     175.1 ± 5.8 ns/op       (avgt, 3 forks × 10 iterations)
+Throughput:  5.84M ± 0.18M ops/s
+Allocation:  296.2 B/op
+GC:          65 collections, 3.05 s total
+```
 
 Three forks matter here: JIT compilation decisions vary between JVM runs, and
 single-fork measurements hide that variance. The spread across forks was around
