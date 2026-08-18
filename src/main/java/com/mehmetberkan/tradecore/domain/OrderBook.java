@@ -14,7 +14,7 @@ public final class OrderBook {
     private long cancelledQuantity = 0;
 
     public List<Trade> submit(Order order) {
-        List<Trade> trades = new ArrayList<>();
+        List<Trade> trades = null;
 
         boolean isBuy = (order.getSide() == Side.BUY);
         TreeMap<Long, ArrayDeque<Order>> counterBook = isBuy ? asks : bids;
@@ -44,6 +44,10 @@ public final class OrderBook {
                 order.fill(qty);
                 resting.fill(qty);
 
+                if(trades == null) {
+                    trades = new ArrayList<>(4);
+                }
+
                 trades.add(new Trade(
                         ++tradeIdSequence,
                         isBuy ? order.getSequence()   : resting.getSequence(),
@@ -68,7 +72,7 @@ public final class OrderBook {
             addOrder(order);
         }
 
-        return trades;
+        return trades == null ? Collections.emptyList() : trades;
     }
 
     public boolean cancel(long sequence) {
