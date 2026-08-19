@@ -89,7 +89,6 @@ public final class LatencyHarness {
     }
 
     private Histogram measure(long intervalNanos) {
-        // 1 ns – 10 s aralığı, 3 anlamlı basamak hassasiyet
         Histogram histogram = new Histogram(1, 10_000_000_000L, 3);
 
         long start = System.nanoTime();
@@ -97,7 +96,6 @@ public final class LatencyHarness {
         for (int i = 0; i < MEASURED_ORDERS; i++) {
             long expectedArrival = start + i * intervalNanos;
 
-            // Hedef hızı tutturmak için bekle
             while (System.nanoTime() < expectedArrival) {
                 Thread.onSpinWait();
             }
@@ -106,6 +104,13 @@ public final class LatencyHarness {
 
             long completed = System.nanoTime();
             histogram.recordValue(completed - expectedArrival);
+
+            // ---- teşhis satırı buraya ----
+            if (i % 1_000_000 == 0 && i > 0) {
+                System.out.printf("  %,d orders, book size %,d, behind by %,d ms%n",
+                        i, book.activeOrderCount(),
+                        (System.nanoTime() - (start + i * intervalNanos)) / 1_000_000);
+            }
         }
 
         return histogram;
