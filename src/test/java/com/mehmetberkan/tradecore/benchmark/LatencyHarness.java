@@ -111,8 +111,7 @@ public final class LatencyHarness {
             isBuy[i] = random.nextBoolean();
             prices[i] = 450_000 + (random.nextInt(40) - 20) * 100;
             quantities[i] = 1 + random.nextInt(100);
-            isCancel[i] = random.nextInt(100) < 30;      // %30 iptal
-        }
+            isCancel[i] = random.nextInt(100) < 45;        }
     }
 
     private Histogram measure(long intervalNanos) {
