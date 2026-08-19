@@ -13,13 +13,13 @@ public final class OrderBook {
     private long tradeIdSequence = 0;
     private long cancelledQuantity = 0;
 
-    public List<Trade> submit(Order order) {
-        List<Trade> trades = null;
+    public void submit(Order order, TradeBuffer out) {
+        out.reset();
 
         boolean isBuy = (order.getSide() == Side.BUY);
         TreeMap<Long, ArrayDeque<Order>> counterBook = isBuy ? asks : bids;
 
-        long now = System.nanoTime();
+        out.timestamp(System.nanoTime());
 
         while (order.getRemainingQuantity() > 0 && !counterBook.isEmpty()) {
 
@@ -44,18 +44,13 @@ public final class OrderBook {
                 order.fill(qty);
                 resting.fill(qty);
 
-                if(trades == null) {
-                    trades = new ArrayList<>(4);
-                }
-
-                trades.add(new Trade(
+                out.add(
                         ++tradeIdSequence,
                         isBuy ? order.getSequence()   : resting.getSequence(),
                         isBuy ? resting.getSequence() : order.getSequence(),
                         bestPrice,
-                        qty,
-                        now
-                ));
+                        qty
+                );
 
                 if (resting.getRemainingQuantity() == 0) {
                     queue.pollFirst();
@@ -71,8 +66,17 @@ public final class OrderBook {
         if (order.getRemainingQuantity() > 0) {
             addOrder(order);
         }
+    }
 
-        return trades == null ? Collections.emptyList() : trades;
+    public List<Trade> submit(Order order) {
+        TradeBuffer buffer = new TradeBuffer();
+        submit(order, buffer);
+        if (buffer.isEmpty()) return Collections.emptyList();
+        List<Trade> trades = new ArrayList<>(buffer.count());
+        for (int i = 0; i < buffer.count(); i++) {
+            trades.add(buffer.toTrade(i));
+        }
+        return trades;
     }
 
     public boolean cancel(long sequence) {
@@ -91,7 +95,6 @@ public final class OrderBook {
         return asks.isEmpty() ? Long.MAX_VALUE : asks.firstKey();
     }
 
-    /** Verilen fiyat seviyesindeki toplam aktif miktar. Test ve market data için. */
     public long quantityAt(Side side, long price) {
         ArrayDeque<Order> queue = (side == Side.BUY ? bids : asks).get(price);
         if (queue == null) return 0;

@@ -2,6 +2,7 @@ package com.mehmetberkan.tradecore.benchmark;
 
 import com.mehmetberkan.tradecore.domain.Order;
 import com.mehmetberkan.tradecore.domain.OrderBook;
+import com.mehmetberkan.tradecore.domain.TradeBuffer;
 import com.mehmetberkan.tradecore.domain.enums.Side;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
@@ -15,10 +16,9 @@ import java.util.concurrent.TimeUnit;
 @Fork(value = 3, jvmArgs = {"-Xms2g", "-Xmx2g", "-XX:+AlwaysPreTouch"})
 public class MatchingEngineBenchmark {
 
-    /** Ölçüm başlamadan önce deftere yerleştirilen emir sayısı. */
     private static final int PRELOAD = 10_000;
 
-    /** Önceden üretilmiş emir parametrelerinin sayısı. 2'nin kuvveti olmalı (bit maskesi için). */
+    /** 2'nin kuvveti olmalı — bit maskesi için. */
     private static final int PARAM_COUNT = 1 << 18;   // 262_144
     private static final int PARAM_MASK = PARAM_COUNT - 1;
 
@@ -27,6 +27,7 @@ public class MatchingEngineBenchmark {
     }
 
     private OrderBook book;
+    private TradeBuffer tradeBuffer;
 
     private boolean[] isBuy;
     private long[] prices;
@@ -40,6 +41,7 @@ public class MatchingEngineBenchmark {
         Random random = new Random(42);
 
         book = new OrderBook();
+        tradeBuffer = new TradeBuffer();
         sequence = 0;
 
         for (int i = 0; i < PRELOAD; i++) {
@@ -47,9 +49,8 @@ public class MatchingEngineBenchmark {
             long price = (side == Side.BUY)
                     ? 449_000 - random.nextInt(20) * 100
                     : 451_000 + random.nextInt(20) * 100;
-            book.submit(new Order(++sequence, side, price, 1 + random.nextInt(100), 0L));
+            book.submit(new Order(++sequence, side, price, 1 + random.nextInt(100), 0L), tradeBuffer);
         }
-
 
         isBuy = new boolean[PARAM_COUNT];
         prices = new long[PARAM_COUNT];
@@ -68,17 +69,22 @@ public class MatchingEngineBenchmark {
     @BenchmarkMode(Mode.AverageTime)
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
     public void latency(Blackhole bh) {
-        bh.consume(submitNext());
+        submitNext(bh);
     }
 
     @Benchmark
     @BenchmarkMode(Mode.Throughput)
     @OutputTimeUnit(TimeUnit.SECONDS)
     public void throughput(Blackhole bh) {
-        bh.consume(submitNext());
+        submitNext(bh);
     }
 
-    private Object submitNext() {
+    /**
+     * Hot path: dizi okuması + Order kurulumu + submit.
+     * Order allocation bilerek burada — gerçek bir borsada da emir başına bir nesne
+     * oluşur. Sıradaki adım bunu object pool ile kaldırmak.
+     */
+    private void submitNext(Blackhole bh) {
         int i = index++ & PARAM_MASK;
         Order order = new Order(
                 ++sequence,
@@ -87,6 +93,7 @@ public class MatchingEngineBenchmark {
                 quantities[i],
                 0L
         );
-        return book.submit(order);
+        book.submit(order, tradeBuffer);
+        bh.consume(tradeBuffer.count());
     }
 }
