@@ -14,6 +14,9 @@ public class Order {
     private long remainingQuantity;
     private OrderStatus status;
 
+    Order prev;
+    Order next;
+
     public Order(long sequence, Side side, long price, long quantity, long timestampNanos) {
         if (quantity <= 0) throw new IllegalArgumentException("Quantity must be greater than 0");
         if (price <= 0) throw new IllegalArgumentException("Price must be greater than 0");
