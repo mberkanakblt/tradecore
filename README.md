@@ -56,11 +56,12 @@ The last invariant is what proves no liquidity is created or lost.
 Measured with JMH, in-process, against a book pre-loaded with 10,000 orders.
 
 ```
-| Step | Change                          | Latency  | Allocation |
-|------|---------------------------------|----------|------------|
-| 0    | Baseline                        | 175.1 ns | 296.2 B/op |
-| 1    | Lazy trade list allocation      | 167.6 ns | 272.4 B/op |
-| 2    | Trades into reusable buffer     | 165.4 ns | 197.8 B/op |
+| Step | Change                          | Latency  | Allocation | Throughput |
+|------|---------------------------------|----------|------------|------------|
+| 0    | Baseline (TreeMap + ArrayDeque) | 175.1 ns | 296.2 B/op | 5.84M/s    |
+| 1    | Lazy trade list allocation      | 167.6 ns | 272.4 B/op | 5.95M/s    |
+| 2    | Trades into reusable buffer     | 165.4 ns | 197.8 B/op | 6.11M/s    |
+| 3    | Flat array book + intrusive list| 131.4 ns | 121.5 B/op | 7.43M/s    |
 ```
 
 Three forks matter here: JIT compilation decisions vary between JVM runs, and
