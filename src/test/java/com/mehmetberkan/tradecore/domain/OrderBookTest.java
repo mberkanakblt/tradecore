@@ -13,6 +13,20 @@ import static org.junit.jupiter.api.Assertions.*;
 class OrderBookTest {
 
     @Test
+    void shouldRejectPricesOutsideBookRange() {
+        OrderBook book = new OrderBook(400_000, 100, 1000);   // 400.00 – 499.90
+
+        assertThrows(IllegalArgumentException.class,
+                () -> book.submit(new Order(1, Side.BUY, 350_000, 10, 0)));   // çok düşük
+
+        assertThrows(IllegalArgumentException.class,
+                () -> book.submit(new Order(2, Side.BUY, 600_000, 10, 0)));   // çok yüksek
+
+        assertThrows(IllegalArgumentException.class,
+                () -> book.submit(new Order(3, Side.BUY, 450_050, 10, 0)));   // tick dışı
+    }
+
+    @Test
     void shouldMatchFullyWhenPricesCross() {
         OrderBook book = new OrderBook();
 
