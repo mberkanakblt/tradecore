@@ -1,6 +1,7 @@
 package com.mehmetberkan.tradecore.domain;
 
 import com.mehmetberkan.tradecore.domain.enums.Side;
+import org.agrona.collections.Long2ObjectHashMap;
 
 import java.util.*;
 
@@ -34,8 +35,7 @@ public final class OrderBook {
     private int bestBidIndex;
     private int bestAskIndex;
 
-    private final Map<Long, Order> orderIndex = new HashMap<>();
-
+    private final Long2ObjectHashMap<Order> orderIndex = new Long2ObjectHashMap<>();
     private long tradeIdSequence;
     private long cancelledQuantity;
 
