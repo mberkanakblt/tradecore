@@ -13,29 +13,46 @@ import java.util.concurrent.TimeUnit;
  * Matching engine throughput/allocation benchmark.
  *
  * Emir parametreleri @Setup'ta önceden üretilir; ölçülen yolda Random çağrısı yoktur.
- * Emirlerin bir kısmı iptal edilir — aksi halde defter sınırsız büyür, emir havuzu
- * tükenir ve ölçülen şey motor değil, şişen bir defterin GC davranışı olur.
+ *
+ * Cancel oranı parametre: 0 ve 45 için ayrı ayrı koşar.
+ *
+ *   0  — defter sınırsız büyür. Gerçekçi değil, ama optimizasyon adımlarının ilk
+ *        beşi bu yükte ölçüldüğü için karşılaştırma referansı olarak durur.
+ *        Havuz ve index buna göre büyük ayrılır.
+ *   45 — defter dengeye yaklaşır. Gerçek piyasaya daha yakın: emirlerin büyük
+ *        kısmı eşleşmeden iptal edilir.
+ *
+ * İki yükü ayrı raporlamanın sebebi: iptal, submit'ten belirgin şekilde ucuz bir
+ * işlem (eşleştirme döngüsü yok, deftere yazma yok). Cancel oranını değiştirip
+ * aynı kolonda karşılaştırmak, kod değişikliğinin kazancıyla iş yükünün
+ * kolaylaşmasını birbirine karıştırır.
  */
 @State(Scope.Thread)
 @Warmup(iterations = 5, time = 1)
 @Measurement(iterations = 10, time = 1)
-@Fork(value = 3, jvmArgs = {"-Xms2g", "-Xmx2g", "-XX:+AlwaysPreTouch"})
+@Fork(value = 3, jvmArgs = {"-Xms4g", "-Xmx4g", "-XX:+AlwaysPreTouch"})
 public class MatchingEngineBenchmark {
 
+    @Param({"0", "45"})
+    public int cancelPercent;
+
     private static final int PRELOAD = 10_000;
+    private static final int LEVEL_COUNT = 10_000;
 
     /** 2'nin kuvveti olmalı — bit maskesi için. */
     private static final int PARAM_COUNT = 1 << 18;      // 262_144
     private static final int PARAM_MASK = PARAM_COUNT - 1;
 
     /** Deftere yerleşen emirlerin sequence'lerini tutan halka tampon. */
-    private static final int LIVE_CAPACITY = 1 << 20;    // 1_048_576
+    private static final int LIVE_CAPACITY = 1 << 23;    // 8_388_608
     private static final int LIVE_MASK = LIVE_CAPACITY - 1;
 
     /** İptal edilecek emri seçerken bakılacak geçmiş penceresi. */
     private static final int CANCEL_WINDOW_MASK = (1 << 16) - 1;   // 65_535
 
-    private static final int CANCEL_PERCENT = 45;
+    /** İptalsiz koşuda defter sınırsız büyüdüğü için havuz çok daha büyük olmalı. */
+    private static final int POOL_WITH_CANCELS = 1 << 18;    // 262_144
+    private static final int POOL_NO_CANCELS = 1 << 23;      // 8_388_608
 
     public static void main(String[] args) throws Exception {
         org.openjdk.jmh.Main.main(args);
@@ -61,7 +78,8 @@ public class MatchingEngineBenchmark {
     public void setup() {
         Random random = new Random(42);
 
-        book = new OrderBook(0, 100, 10_000, 1 << 18);
+        int poolCapacity = (cancelPercent == 0) ? POOL_NO_CANCELS : POOL_WITH_CANCELS;
+        book = new OrderBook(0, 100, LEVEL_COUNT, poolCapacity);
         tradeBuffer = new TradeBuffer();
         sequence = 0;
 
@@ -91,10 +109,17 @@ public class MatchingEngineBenchmark {
             isBuy[i] = random.nextBoolean();
             prices[i] = 450_000 + (random.nextInt(40) - 20) * 100;
             quantities[i] = 1 + random.nextInt(100);
-            isCancel[i] = random.nextInt(100) < CANCEL_PERCENT;
+            isCancel[i] = random.nextInt(100) < cancelPercent;
         }
 
         index = 0;
+    }
+
+    /** Her iterasyon sonunda defterin nereye ulaştığını raporlar. */
+    @TearDown(Level.Iteration)
+    public void reportBookSize() {
+        System.out.printf("    [book %,d, pool free %,d]%n",
+                book.activeOrderCount(), book.poolAvailable());
     }
 
     @Benchmark
