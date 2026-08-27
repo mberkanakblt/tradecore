@@ -61,7 +61,7 @@ public class MatchingEngineBenchmark {
     public void setup() {
         Random random = new Random(42);
 
-        book = new OrderBook();
+        book = new OrderBook(0, 100, 10_000, 1 << 18);
         tradeBuffer = new TradeBuffer();
         sequence = 0;
 

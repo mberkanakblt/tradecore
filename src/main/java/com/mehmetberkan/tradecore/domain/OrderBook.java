@@ -24,7 +24,7 @@ public final class OrderBook {
     private int bestBidIndex;
     private int bestAskIndex;
 
-    private final Long2ObjectHashMap<Order> orderIndex = new Long2ObjectHashMap<>();
+    private final Long2ObjectHashMap<Order> orderIndex;
     private final OrderPool orderPool;
 
     private long tradeIdSequence;
@@ -45,6 +45,7 @@ public final class OrderBook {
         this.basePrice = basePrice;
         this.tickSize = tickSize;
         this.levelCount = levelCount;
+        this.orderIndex = new Long2ObjectHashMap<>(poolCapacity, 0.65f);
 
         this.bidLevels = new PriceLevel[levelCount];
         this.askLevels = new PriceLevel[levelCount];
