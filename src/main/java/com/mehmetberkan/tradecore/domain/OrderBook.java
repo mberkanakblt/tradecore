@@ -3,27 +3,16 @@ package com.mehmetberkan.tradecore.domain;
 import com.mehmetberkan.tradecore.domain.enums.Side;
 import org.agrona.collections.Long2ObjectHashMap;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
-/**
- * Flat (dizi tabanlı) order book.
- *
- * Fiyat seviyeleri TreeMap yerine düz bir dizide tutulur:
- *     index = (price - basePrice) / tickSize
- * Böylece seviye erişimi O(1) ve bellek ardışık olur — ağaç gezintisindeki
- * pointer chasing ve cache miss'ler ortadan kalkar.
- *
- * Her seviyedeki emirler intrusive doubly-linked list ile FIFO sırada tutulur
- * (bağlantılar Order.prev / Order.next içinde). Emir elimizdeyse listeden
- * çıkarmak O(1) olduğu için lazy deletion'a gerek kalmaz.
- *
- * Tek thread'lik kullanım içindir.
- */
 public final class OrderBook {
 
     private static final long DEFAULT_BASE_PRICE = 0;
     private static final long DEFAULT_TICK_SIZE = 100;
     private static final int DEFAULT_LEVEL_COUNT = 10_000;
+    private static final int DEFAULT_POOL_CAPACITY = 1 << 20;   // 1_048_576
 
     private final long basePrice;
     private final long tickSize;
@@ -36,14 +25,20 @@ public final class OrderBook {
     private int bestAskIndex;
 
     private final Long2ObjectHashMap<Order> orderIndex = new Long2ObjectHashMap<>();
+    private final OrderPool orderPool;
+
     private long tradeIdSequence;
     private long cancelledQuantity;
 
     public OrderBook() {
-        this(DEFAULT_BASE_PRICE, DEFAULT_TICK_SIZE, DEFAULT_LEVEL_COUNT);
+        this(DEFAULT_BASE_PRICE, DEFAULT_TICK_SIZE, DEFAULT_LEVEL_COUNT, DEFAULT_POOL_CAPACITY);
     }
 
     public OrderBook(long basePrice, long tickSize, int levelCount) {
+        this(basePrice, tickSize, levelCount, DEFAULT_POOL_CAPACITY);
+    }
+
+    public OrderBook(long basePrice, long tickSize, int levelCount, int poolCapacity) {
         if (tickSize <= 0) throw new IllegalArgumentException("tickSize must be positive");
         if (levelCount <= 0) throw new IllegalArgumentException("levelCount must be positive");
 
@@ -60,15 +55,23 @@ public final class OrderBook {
 
         this.bestBidIndex = -1;
         this.bestAskIndex = levelCount;
+
+        this.orderPool = new OrderPool(poolCapacity);
     }
 
-    public void submit(Order order, TradeBuffer out) {
+    /**
+     * Emri motora verir. Oluşan trade'ler out buffer'ına yazılır.
+     * Order nesnesi havuzdan alınır ve gerektiğinde havuza iade edilir.
+     */
+    public void submit(long sequence, Side side, long price, long quantity, TradeBuffer out) {
         out.reset();
         out.timestamp(System.nanoTime());
 
-        int limitIndex = toIndex(order.getPrice());
+        int limitIndex = toIndex(price);
 
-        if (order.getSide() == Side.BUY) {
+        Order order = orderPool.acquire(sequence, side, price, quantity, 0L);
+
+        if (side == Side.BUY) {
             matchAgainstAsks(order, limitIndex, out);
         } else {
             matchAgainstBids(order, limitIndex, out);
@@ -76,6 +79,8 @@ public final class OrderBook {
 
         if (order.getRemainingQuantity() > 0) {
             addOrder(order, limitIndex);
+        } else {
+            orderPool.release(order);   // hiç deftere girmedi
         }
     }
 
@@ -92,7 +97,6 @@ public final class OrderBook {
         level.unlink(order);
         order.cancel();
 
-        // Best index bu seviyeyi gösteriyorduysa ve seviye boşaldıysa kaydır
         if (level.isEmpty()) {
             if (isBuy && index == bestBidIndex) {
                 advanceBestBid();
@@ -100,6 +104,8 @@ public final class OrderBook {
                 advanceBestAsk();
             }
         }
+
+        orderPool.release(order);
         return true;
     }
 
@@ -111,9 +117,35 @@ public final class OrderBook {
         return bestAskIndex >= levelCount ? Long.MAX_VALUE : toPrice(bestAskIndex);
     }
 
+    /**
+     * Bir fiyat seviyesindeki toplam kalan miktar. Seviye sayacı tutulduğu için O(1).
+     */
     public long quantityAt(Side side, long price) {
         int index = toIndex(price);
         return (side == Side.BUY ? bidLevels[index] : askLevels[index]).totalQuantity;
+    }
+
+    /**
+     * Bir fiyat seviyesindeki emir sayısı.
+     */
+    public int orderCountAt(Side side, long price) {
+        int index = toIndex(price);
+        return (side == Side.BUY ? bidLevels[index] : askLevels[index]).orderCount;
+    }
+
+    /**
+     * Bir emrin defterde bekleyip beklemediği.
+     */
+    public boolean isResting(long sequence) {
+        return orderIndex.containsKey(sequence);
+    }
+
+    /**
+     * Defterde bekleyen bir emrin kalan miktarı, yoksa -1.
+     */
+    public long remainingQuantityOf(long sequence) {
+        Order order = orderIndex.get(sequence);
+        return order == null ? -1 : order.getRemainingQuantity();
     }
 
     public boolean isEmpty() {
@@ -136,10 +168,16 @@ public final class OrderBook {
         return cancelledQuantity;
     }
 
-    /** Test ve dış kullanım için. Her çağrıda allocation yapar — hot path'te kullanma. */
-    public List<Trade> submit(Order order) {
+    public int poolAvailable() {
+        return orderPool.available();
+    }
+
+    /**
+     * Test ve dış kullanım için. Her çağrıda allocation yapar
+     */
+    public List<Trade> submit(long sequence, Side side, long price, long quantity) {
         TradeBuffer buffer = new TradeBuffer();
-        submit(order, buffer);
+        submit(sequence, side, price, quantity, buffer);
         if (buffer.isEmpty()) return Collections.emptyList();
         List<Trade> trades = new ArrayList<>(buffer.count());
         for (int i = 0; i < buffer.count(); i++) {
@@ -148,9 +186,9 @@ public final class OrderBook {
         return trades;
     }
 
-    // ---------- matching ----------
-
-    /** Gelen BUY emrini satıcılarla eşleştirir: en ucuz satıcıdan başlayıp yukarı yürür. */
+    /**
+     * Gelen BUY emrini satıcılarla eşleştirir: en ucuz satıcıdan başlayıp yukarı yürür.
+     */
     private void matchAgainstAsks(Order order, int limitIndex, TradeBuffer out) {
         while (order.getRemainingQuantity() > 0
                 && bestAskIndex < levelCount
@@ -167,7 +205,9 @@ public final class OrderBook {
         }
     }
 
-    /** Gelen SELL emrini alıcılarla eşleştirir: en yüksek alıcıdan başlayıp aşağı iner. */
+    /**
+     * Gelen SELL emrini alıcılarla eşleştirir: en yüksek alıcıdan başlayıp aşağı iner.
+     */
     private void matchAgainstBids(Order order, int limitIndex, TradeBuffer out) {
         while (order.getRemainingQuantity() > 0
                 && bestBidIndex >= 0
@@ -184,7 +224,6 @@ public final class OrderBook {
         }
     }
 
-    /** Tek bir fiyat seviyesini FIFO sırayla tüketir. */
     private void fillLevel(Order order, PriceLevel level, long price,
                            boolean incomingIsBuy, TradeBuffer out) {
 
@@ -199,7 +238,7 @@ public final class OrderBook {
 
             out.add(
                     ++tradeIdSequence,
-                    incomingIsBuy ? order.getSequence()   : resting.getSequence(),
+                    incomingIsBuy ? order.getSequence() : resting.getSequence(),
                     incomingIsBuy ? resting.getSequence() : order.getSequence(),
                     price,
                     qty
@@ -208,6 +247,7 @@ public final class OrderBook {
             if (resting.getRemainingQuantity() == 0) {
                 level.unlink(resting);
                 orderIndex.remove(resting.getSequence());
+                orderPool.release(resting);
             }
         }
     }
@@ -223,7 +263,6 @@ public final class OrderBook {
         orderIndex.put(order.getSequence(), order);
     }
 
-    /** En iyi alıcıyı aşağı doğru kaydırır. Amortize O(1). */
     private void advanceBestBid() {
         while (bestBidIndex >= 0 && bidLevels[bestBidIndex].isEmpty()) {
             bestBidIndex--;
@@ -279,6 +318,12 @@ public final class OrderBook {
             if (!o.isActive()) {
                 throw new IllegalStateException("inactive order in index: " + o.getSequence());
             }
+        }
+
+        int inUse = orderPool.capacity() - orderPool.available();
+        if (inUse != orderIndex.size()) {
+            throw new IllegalStateException(
+                    "pool leak: inUse=" + inUse + " resting=" + orderIndex.size());
         }
     }
 

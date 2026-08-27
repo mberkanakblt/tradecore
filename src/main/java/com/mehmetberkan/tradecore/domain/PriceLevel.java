@@ -1,10 +1,5 @@
 package com.mehmetberkan.tradecore.domain;
 
-/**
- * Tek bir fiyat seviyesi. Emirler zaman önceliğine göre FIFO sırada,
- * intrusive doubly-linked list olarak tutulur bağlantı alanları
- * Order nesnesinin içinde (next/prev), ayrı node nesnesi yok.
- */
 final class PriceLevel {
 
     Order head;
@@ -30,14 +25,14 @@ final class PriceLevel {
     }
 
     void unlink(Order order) {
-        if(order.prev != null) {
+        if (order.prev != null) {
             order.prev.next = order.next;
-        }else{
+        } else {
             head = order.next;
         }
-        if(order.next != null) {
+        if (order.next != null) {
             order.next.prev = order.prev;
-        }else {
+        } else {
             tail = order.prev;
         }
         order.prev = null;

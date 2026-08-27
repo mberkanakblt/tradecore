@@ -52,7 +52,6 @@ public final class LatencyHarness {
     private long[] quantities;
     private boolean[] isCancel;
 
-    // Halka tampon
     private long[] liveSequences;
     private int liveWriteIndex;
 
@@ -88,20 +87,18 @@ public final class LatencyHarness {
         liveSequences = new long[LIVE_CAPACITY];
         liveWriteIndex = 0;
 
-        // Gerçekçi defter derinliği
         for (int i = 0; i < PRELOAD; i++) {
             Side side = random.nextBoolean() ? Side.BUY : Side.SELL;
             long price = (side == Side.BUY)
                     ? 449_000 - random.nextInt(20) * 100
                     : 451_000 + random.nextInt(20) * 100;
-            Order order = new Order(++sequence, side, price, 1 + random.nextInt(100), 0L);
-            book.submit(order, tradeBuffer);
-            if (order.getRemainingQuantity() > 0) {
-                recordLive(order.getSequence());
+            long seq = ++sequence;
+            book.submit(seq, side, price, 1 + random.nextInt(100), tradeBuffer);
+            if (book.isResting(seq)) {
+                recordLive(seq);
             }
         }
 
-        // Hot path'te Random kalmasın diye her şey önceden
         isBuy = new boolean[PARAM_COUNT];
         prices = new long[PARAM_COUNT];
         quantities = new long[PARAM_COUNT];
@@ -149,22 +146,20 @@ public final class LatencyHarness {
             return;
         }
 
-        Order order = new Order(
-                ++sequence,
+        long seq = ++sequence;
+        book.submit(
+                seq,
                 isBuy[p] ? Side.BUY : Side.SELL,
                 prices[p],
                 quantities[p],
-                0L
+                tradeBuffer
         );
-        book.submit(order, tradeBuffer);
 
-        if (order.getRemainingQuantity() > 0) {
-            recordLive(order.getSequence());
+        if (book.isResting(seq)) {
+            recordLive(seq);
         }
     }
 
-    /** Son CANCEL_WINDOW emirden birini seçer. Üstüne yazılmış eski değer denk gelirse
-     *  cancel() zaten false döner — zararsız. */
     private long pickVictim(int p) {
         int offset = p & CANCEL_WINDOW_MASK;
         int slot = (liveWriteIndex - 1 - offset) & LIVE_MASK;

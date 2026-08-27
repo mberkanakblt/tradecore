@@ -3,19 +3,27 @@ package com.mehmetberkan.tradecore.domain;
 import com.mehmetberkan.tradecore.domain.enums.OrderStatus;
 import com.mehmetberkan.tradecore.domain.enums.Side;
 
-public class Order {
+public final class Order {
 
-    private final long sequence;
-    private final Side side;
-    private final long price;
-    private final long quantity;
-    private final long timestampNanos;
+    private long sequence;
+    private Side side;
+    private long price;
+    private long quantity;
+    private long timestampNanos;
 
     private long remainingQuantity;
     private OrderStatus status;
 
     Order prev;
     Order next;
+
+    static Order blank() {
+        return new Order();
+    }
+
+    private Order() {
+
+    }
 
     public Order(long sequence, Side side, long price, long quantity, long timestampNanos) {
         if (quantity <= 0) throw new IllegalArgumentException("Quantity must be greater than 0");
@@ -27,6 +35,20 @@ public class Order {
         this.timestampNanos = timestampNanos;
         this.remainingQuantity = quantity;
         this.status = OrderStatus.NEW;
+    }
+
+    void reset(long sequence, Side side, long price, long quantity, long timestampNanos) {
+        if (quantity <= 0) throw new IllegalArgumentException("Quantity must be greater than 0");
+        if (price <= 0) throw new IllegalArgumentException("Price must be greater than 0");
+        this.sequence = sequence;
+        this.side = side;
+        this.price = price;
+        this.quantity = quantity;
+        this.remainingQuantity = quantity;
+        this.timestampNanos = timestampNanos;
+        this.status = OrderStatus.NEW;
+        this.prev = null;
+        this.next = null;
     }
 
     public void fill(long quantity) {

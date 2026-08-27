@@ -1,6 +1,5 @@
 package com.mehmetberkan.tradecore.benchmark;
 
-import com.mehmetberkan.tradecore.domain.Order;
 import com.mehmetberkan.tradecore.domain.OrderBook;
 import com.mehmetberkan.tradecore.domain.TradeBuffer;
 import com.mehmetberkan.tradecore.domain.enums.Side;
@@ -49,7 +48,7 @@ public class MatchingEngineBenchmark {
             long price = (side == Side.BUY)
                     ? 449_000 - random.nextInt(20) * 100
                     : 451_000 + random.nextInt(20) * 100;
-            book.submit(new Order(++sequence, side, price, 1 + random.nextInt(100), 0L), tradeBuffer);
+            book.submit(++sequence, side, price, 1 + random.nextInt(100), tradeBuffer);
         }
 
         isBuy = new boolean[PARAM_COUNT];
@@ -79,21 +78,16 @@ public class MatchingEngineBenchmark {
         submitNext(bh);
     }
 
-    /**
-     * Hot path: dizi okuması + Order kurulumu + submit.
-     * Order allocation bilerek burada — gerçek bir borsada da emir başına bir nesne
-     * oluşur. Sıradaki adım bunu object pool ile kaldırmak.
-     */
+    /** Hot path: dizi okuması + submit. Order nesnesi artık havuzdan geliyor. */
     private void submitNext(Blackhole bh) {
         int i = index++ & PARAM_MASK;
-        Order order = new Order(
+        book.submit(
                 ++sequence,
                 isBuy[i] ? Side.BUY : Side.SELL,
                 prices[i],
                 quantities[i],
-                0L
+                tradeBuffer
         );
-        book.submit(order, tradeBuffer);
         bh.consume(tradeBuffer.count());
     }
 }

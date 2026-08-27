@@ -1,6 +1,5 @@
 package com.mehmetberkan.tradecore.domain;
 
-import com.mehmetberkan.tradecore.domain.enums.OrderStatus;
 import com.mehmetberkan.tradecore.domain.enums.Side;
 import org.junit.jupiter.api.Test;
 
@@ -17,103 +16,112 @@ class OrderBookTest {
         OrderBook book = new OrderBook(400_000, 100, 1000);   // 400.00 – 499.90
 
         assertThrows(IllegalArgumentException.class,
-                () -> book.submit(new Order(1, Side.BUY, 350_000, 10, 0)));   // çok düşük
+                () -> book.submit(1, Side.BUY, 350_000, 10));   // çok düşük
 
         assertThrows(IllegalArgumentException.class,
-                () -> book.submit(new Order(2, Side.BUY, 600_000, 10, 0)));   // çok yüksek
+                () -> book.submit(2, Side.BUY, 600_000, 10));   // çok yüksek
 
         assertThrows(IllegalArgumentException.class,
-                () -> book.submit(new Order(3, Side.BUY, 450_050, 10, 0)));   // tick dışı
+                () -> book.submit(3, Side.BUY, 450_050, 10));   // tick dışı
+
+        // Reddedilen emirler havuzdan nesne sızdırmamalı
+        book.validateInvariants();
+        assertEquals(book.poolAvailable(), book.poolAvailable());
+        assertTrue(book.isEmpty());
     }
 
     @Test
     void shouldMatchFullyWhenPricesCross() {
         OrderBook book = new OrderBook();
 
-        Order sell = new Order(1, Side.SELL, 455000, 100, 0);
-        Order buy  = new Order(2, Side.BUY,  455000, 100, 0);
-
         // Defter boşken gelen satıcı eşleşemez, deftere yazılır
-        List<Trade> noTrades = book.submit(sell);
+        List<Trade> noTrades = book.submit(1, Side.SELL, 455_000, 100);
         assertTrue(noTrades.isEmpty());
-        assertEquals(455000, book.bestAsk());
+        assertEquals(455_000, book.bestAsk());
         assertEquals(1, book.activeOrderCount());
+        assertTrue(book.isResting(1));
 
         // Alıcı gelir, tam eşleşme olur
-        List<Trade> trades = book.submit(buy);
+        List<Trade> trades = book.submit(2, Side.BUY, 455_000, 100);
 
         // 1) Trade doğru mu
         assertEquals(1, trades.size());
         Trade trade = trades.getFirst();
         assertEquals(2, trade.buyOrderSequence());
         assertEquals(1, trade.sellOrderSequence());
-        assertEquals(455000, trade.price());
+        assertEquals(455_000, trade.price());
         assertEquals(100, trade.quantity());
 
-        // 2) Emirlerin durumu doğru mu
-        assertEquals(OrderStatus.FILLED, sell.getStatus());
-        assertEquals(OrderStatus.FILLED, buy.getStatus());
-        assertEquals(0, sell.getRemainingQuantity());
-        assertEquals(0, buy.getRemainingQuantity());
+        // 2) İki emir de defterden çıktı
+        assertFalse(book.isResting(1));
+        assertFalse(book.isResting(2));
 
-        // 3) Defter temizlendi mi
+        // 3) Defter temizlendi
         assertTrue(book.isEmpty());
         assertEquals(0, book.activeOrderCount());
         assertEquals(Long.MIN_VALUE, book.bestBid());
         assertEquals(Long.MAX_VALUE, book.bestAsk());
+
+        book.validateInvariants();
     }
+
     @Test
     void shouldWalkTheBookAcrossPriceLevels() {
         OrderBook book = new OrderBook();
 
         // Defterde üç ayrı fiyat seviyesinde satıcılar
-        book.submit(new Order(1, Side.SELL, 455000, 50, 0));   // 45.50
-        book.submit(new Order(2, Side.SELL, 456000, 50, 0));   // 45.60
-        book.submit(new Order(3, Side.SELL, 457000, 50, 0));   // 45.70
+        book.submit(1, Side.SELL, 455_000, 50);   // 45.50
+        book.submit(2, Side.SELL, 456_000, 50);   // 45.60
+        book.submit(3, Side.SELL, 457_000, 50);   // 45.70
 
         // Alıcı 45.60'a kadar ödemeye razı, 120 adet istiyor
-        Order buy = new Order(4, Side.BUY, 456000, 120, 0);
-        List<Trade> trades = book.submit(buy);
+        List<Trade> trades = book.submit(4, Side.BUY, 456_000, 120);
 
         // İki seviyeden doldu: 45.50'den 50, 45.60'tan 50 = 100
         assertEquals(2, trades.size());
 
-        assertEquals(455000, trades.get(0).price());
+        assertEquals(455_000, trades.get(0).price());
         assertEquals(50, trades.get(0).quantity());
         assertEquals(1, trades.get(0).sellOrderSequence());
 
-        assertEquals(456000, trades.get(1).price());
+        assertEquals(456_000, trades.get(1).price());
         assertEquals(50, trades.get(1).quantity());
         assertEquals(2, trades.get(1).sellOrderSequence());
 
         // Alıcının 20'si kaldı, deftere bid olarak yazıldı
-        assertEquals(20, buy.getRemainingQuantity());
-        assertEquals(OrderStatus.PARTIALLY_FILLED, buy.getStatus());
-        assertEquals(456000, book.bestBid());
-        assertEquals(20, book.quantityAt(Side.BUY, 456000));
+        assertTrue(book.isResting(4));
+        assertEquals(20, book.remainingQuantityOf(4));
+        assertEquals(456_000, book.bestBid());
+        assertEquals(20, book.quantityAt(Side.BUY, 456_000));
+
+        // Dolan iki satıcı defterden çıktı
+        assertFalse(book.isResting(1));
+        assertFalse(book.isResting(2));
 
         // 45.70 limitin üstündeydi, dokunulmadı
-        assertEquals(457000, book.bestAsk());
-        assertEquals(50, book.quantityAt(Side.SELL, 457000));
+        assertEquals(457_000, book.bestAsk());
+        assertEquals(50, book.quantityAt(Side.SELL, 457_000));
 
         // Defterde kalanlar: 1 bid + 1 ask
         assertEquals(2, book.activeOrderCount());
+
+        book.validateInvariants();
     }
+
     @Test
     void shouldSkipCancelledOrdersWhenMatching() {
         OrderBook book = new OrderBook();
 
-        Order first  = new Order(1, Side.SELL, 455000, 100, 0);
-        Order second = new Order(2, Side.SELL, 455000, 100, 0);
-
-        book.submit(first);
-        book.submit(second);
+        book.submit(1, Side.SELL, 455_000, 100);
+        book.submit(2, Side.SELL, 455_000, 100);
         assertEquals(2, book.activeOrderCount());
 
-        // İlk satıcı iptal ediyor
+        // İlk satıcı iptal ediyor — artık listeden fiziksel olarak çıkıyor
         assertTrue(book.cancel(1));
-        assertEquals(OrderStatus.CANCELLED, first.getStatus());
+        assertFalse(book.isResting(1));
         assertEquals(1, book.activeOrderCount());
+        assertEquals(1, book.orderCountAt(Side.SELL, 455_000));
+        assertEquals(100, book.quantityAt(Side.SELL, 455_000));
 
         // Aynı emri ikinci kez iptal etmek başarısız olmalı
         assertFalse(book.cancel(1));
@@ -121,52 +129,87 @@ class OrderBookTest {
         // Var olmayan bir emir de iptal edilemez
         assertFalse(book.cancel(999));
 
-        // Alıcı gelir: iptal edilmiş seq 1 atlanmalı, seq 2 ile eşleşmeli
-        Order buy = new Order(3, Side.BUY, 455000, 100, 0);
-        List<Trade> trades = book.submit(buy);
+        // Alıcı gelir: iptal edilmiş seq 1 yok, seq 2 ile eşleşmeli
+        List<Trade> trades = book.submit(3, Side.BUY, 455_000, 100);
 
         assertEquals(1, trades.size());
         assertEquals(2, trades.getFirst().sellOrderSequence());   // 1 DEĞİL
         assertEquals(100, trades.getFirst().quantity());
 
-        assertEquals(OrderStatus.FILLED, second.getStatus());
-        assertEquals(100, first.getRemainingQuantity());          // iptal edilen dokunulmadan kaldı
+        assertFalse(book.isResting(2));
 
-        // İptal edilmiş emir deque'ten atıldı, seviye temizlendi
+        // İptal edilen miktar muhasebeye girdi
+        assertEquals(100, book.cancelledQuantity());
+
         assertTrue(book.isEmpty());
         assertEquals(0, book.activeOrderCount());
         assertEquals(Long.MAX_VALUE, book.bestAsk());
+
+        book.validateInvariants();
     }
+
     @Test
     void shouldRespectTimePriorityAtSamePrice() {
         OrderBook book = new OrderBook();
 
-        book.submit(new Order(1, Side.SELL, 455000, 50, 0));
-        book.submit(new Order(2, Side.SELL, 455000, 50, 0));
-        book.submit(new Order(3, Side.SELL, 455000, 50, 0));
+        book.submit(1, Side.SELL, 455_000, 50);
+        book.submit(2, Side.SELL, 455_000, 50);
+        book.submit(3, Side.SELL, 455_000, 50);
 
         // Sadece 50 alıyor: aynı fiyatta ilk gelen dolmalı
-        List<Trade> trades = book.submit(new Order(4, Side.BUY, 455000, 50, 0));
+        List<Trade> trades = book.submit(4, Side.BUY, 455_000, 50);
 
         assertEquals(1, trades.size());
         assertEquals(1, trades.getFirst().sellOrderSequence());
 
-        assertEquals(100, book.quantityAt(Side.SELL, 455000));
+        assertFalse(book.isResting(1));
+        assertTrue(book.isResting(2));
+        assertTrue(book.isResting(3));
+
+        assertEquals(100, book.quantityAt(Side.SELL, 455_000));
+        assertEquals(2, book.orderCountAt(Side.SELL, 455_000));
         assertEquals(2, book.activeOrderCount());
+
+        book.validateInvariants();
     }
 
     @Test
     void shouldTradeAtRestingOrderPrice() {
         OrderBook book = new OrderBook();
 
-        book.submit(new Order(1, Side.SELL, 455000, 100, 0));
+        book.submit(1, Side.SELL, 455_000, 100);
 
         // Alıcı 46.00'a kadar ödemeye razı ama 45.50'den alacak
-        List<Trade> trades = book.submit(new Order(2, Side.BUY, 460000, 100, 0));
+        List<Trade> trades = book.submit(2, Side.BUY, 460_000, 100);
 
-        assertEquals(455000, trades.getFirst().price());
+        assertEquals(455_000, trades.getFirst().price());
         assertTrue(book.isEmpty());
+
+        book.validateInvariants();
     }
+
+    @Test
+    void shouldReturnOrdersToThePool() {
+        OrderBook book = new OrderBook();
+        int capacity = book.poolAvailable();
+
+        // Deftere giren emir havuzdan bir nesne tutar
+        book.submit(1, Side.SELL, 455_000, 100);
+        assertEquals(capacity - 1, book.poolAvailable());
+
+        // Tam eşleşme: iki emir de havuza döner
+        book.submit(2, Side.BUY, 455_000, 100);
+        assertEquals(capacity, book.poolAvailable());
+
+        // İptal de havuza iade eder
+        book.submit(3, Side.SELL, 455_000, 100);
+        assertEquals(capacity - 1, book.poolAvailable());
+        book.cancel(3);
+        assertEquals(capacity, book.poolAvailable());
+
+        book.validateInvariants();
+    }
+
     @Test
     void shouldMaintainInvariantsUnderRandomLoad() {
         OrderBook book = new OrderBook();
@@ -188,15 +231,14 @@ class OrderBookTest {
                 long price = 450_000 + random.nextInt(20) * 1_000;   // 45.00 – 45.19
                 long qty = 1 + random.nextInt(100);
 
-                Order order = new Order(seq, side, price, qty, 0);
                 totalSubmitted += qty;
 
-                List<Trade> trades = book.submit(order);
+                List<Trade> trades = book.submit(seq, side, price, qty);
                 for (Trade t : trades) {
                     totalMatched += t.quantity();
                 }
 
-                if (order.getRemainingQuantity() > 0) {
+                if (book.isResting(seq)) {
                     liveSequences.add(seq);
                 }
             }
@@ -208,5 +250,4 @@ class OrderBookTest {
         long restingQuantity = book.totalRestingQuantity();
         assertEquals(totalSubmitted, totalMatched * 2 + restingQuantity + book.cancelledQuantity());
     }
-
 }
