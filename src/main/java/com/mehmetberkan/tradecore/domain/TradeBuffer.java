@@ -1,14 +1,5 @@
 package com.mehmetberkan.tradecore.domain;
 
-/**
- * Bir submit çağrısında üretilen trade'leri tutan, yeniden kullanılabilir buffer.
- *
- * Trade nesnesi üretmek yerine alanları paralel primitive dizilere yazar
- * (struct-of-arrays). Böylece eşleşme başına allocation olmaz ve okuma sırasında
- * bellek erişimi ardışık kalır.
- *
- * Tek thread'lik kullanım içindir. Çağıran her submit öncesi reset() çağırmalıdır.
- */
 public final class TradeBuffer {
 
     private static final int DEFAULT_CAPACITY = 16;

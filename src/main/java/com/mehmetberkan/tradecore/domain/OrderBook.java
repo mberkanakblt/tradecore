@@ -81,7 +81,7 @@ public final class OrderBook {
         if (order.getRemainingQuantity() > 0) {
             addOrder(order, limitIndex);
         } else {
-            orderPool.release(order);   // hiç deftere girmedi
+            orderPool.release(order);
         }
     }
 
@@ -187,9 +187,6 @@ public final class OrderBook {
         return trades;
     }
 
-    /**
-     * Gelen BUY emrini satıcılarla eşleştirir: en ucuz satıcıdan başlayıp yukarı yürür.
-     */
     private void matchAgainstAsks(Order order, int limitIndex, TradeBuffer out) {
         while (order.getRemainingQuantity() > 0
                 && bestAskIndex < levelCount
@@ -206,9 +203,6 @@ public final class OrderBook {
         }
     }
 
-    /**
-     * Gelen SELL emrini alıcılarla eşleştirir: en yüksek alıcıdan başlayıp aşağı iner.
-     */
     private void matchAgainstBids(Order order, int limitIndex, TradeBuffer out) {
         while (order.getRemainingQuantity() > 0
                 && bestBidIndex >= 0
